@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "author": "karc",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-v1",
+      "id": "esp32",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-ds18b20",
+      "id": "ds18b20",
+      "top": -60,
+      "left": 240,
+      "attrs": { "temperature": "36.6" }
+    },
+    {
+      "type": "wokwi-ssd1306",
+      "id": "oled1",
+      "top": -80,
+      "left": -160,
+      "attrs": { "i2cAddress": "0x3c" }
+    },
+    {
+      "type": "wokwi-pir-motion-sensor",
+      "id": "pir1",
+      "top": 120,
+      "left": 240,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzz1",
+      "top": 200,
+      "left": -200,
+      "attrs": { "volume": "0.5" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzz2",
+      "top": 260,
+      "left": -200,
+      "attrs": { "volume": "0.5" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzz3",
+      "top": 320,
+      "left": -200,
+      "attrs": { "volume": "0.5" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzz4",
+      "top": 380,
+      "left": -200,
+      "attrs": { "volume": "0.5" }
+    }
+  ],
+  "connections": [
+    ["esp32:3V3", "ds18b20:VCC", "red", []],
+    ["esp32:GND",  "ds18b20:GND", "black", []],
+    ["esp32:D14",  "ds18b20:DQ",  "green", []],
+
+    ["esp32:3V3",  "oled1:VCC", "red",   []],
+    ["esp32:GND",  "oled1:GND", "black", []],
+    ["esp32:D21",  "oled1:SDA", "blue",  []],
+    ["esp32:D22",  "oled1:SCL", "yellow", []],
+
+    ["esp32:3V3",  "pir1:VCC", "red",   []],
+    ["esp32:GND",  "pir1:GND", "black", []],
+    ["esp32:D12",  "pir1:OUT", "orange", []],
+
+    ["esp32:D4",   "buzz1:1",  "purple", []],
+    ["esp32:GND",  "buzz1:2",  "black",  []],
+
+    ["esp32:D16",  "buzz2:1",  "purple", []],
+    ["esp32:GND",  "buzz2:2",  "black",  []],
+
+    ["esp32:D17",  "buzz3:1",  "purple", []],
+    ["esp32:GND",  "buzz3:2",  "black",  []],
+
+    ["esp32:D5",   "buzz4:1",  "purple", []],
+    ["esp32:GND",  "buzz4:2",  "black",  []]
+  ],
+  "dependencies": {}
+}

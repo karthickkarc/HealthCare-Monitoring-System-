@@ -1,0 +1,271 @@
+/*
+ * Healthcare Monitoring System
+ * ESP32 + FreeRTOS + MQTT (Adafruit IO)
+ *
+ * Sensors:
+ *   - DS18B20  : Body Temperature (GPIO 14)
+ *   - Simulated: Heart Rate & SpO2 (random, replace with real sensor)
+ *   - PIR      : Motion Detector  (GPIO 12)
+ *
+ * Actuators:
+ *   - OLED SSD1306 128x64 (I2C 0x3C)
+ *   - Buzzer x4 (GPIO 4, 16, 17, 5)
+ *
+ * Cloud: Adafruit IO via MQTT
+ */
+
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <WiFi.h>
+#include "Adafruit_MQTT.h"
+#include "Adafruit_MQTT_Client.h"
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+
+// ── Pin definitions ────────────────────────────────────────────────────────────
+#define TEMP_SENSOR_PIN  14
+#define MOTION_PIN       12
+
+#define BUZZER_PIN_1      4   // Temperature alert
+#define BUZZER_PIN_2     16   // Heart-rate alert
+#define BUZZER_PIN_3     17   // SpO2 alert
+#define BUZZER_PIN_4      5   // Motion alert
+
+// ── OLED ───────────────────────────────────────────────────────────────────────
+#define SCREEN_WIDTH  128
+#define SCREEN_HEIGHT  64
+#define OLED_RESET     -1
+#define OLED_ADDRESS 0x3C
+
+// ── Wi-Fi ──────────────────────────────────────────────────────────────────────
+#define WIFI_SSID "Wokwi-GUEST"
+#define WIFI_PASS ""
+
+// ── Adafruit IO ────────────────────────────────────────────────────────────────
+#define IO_USERNAME  "karc"
+#define IO_KEY       "aio_GHZO40CJdtwpAkJ1n3DA0EFjLlNF"
+
+#define AIO_SERVER     "io.adafruit.com"
+#define AIO_SERVERPORT  1883
+
+#define TEMP_FEED    IO_USERNAME "/feeds/body-temperature-degrees-c"
+#define HR_FEED      IO_USERNAME "/feeds/heart-rate-monitor"
+#define MOTION_FEED  IO_USERNAME "/feeds/motion-detector"
+#define SPO2_FEED    IO_USERNAME "/feeds/spo2-percent"
+#define FLAG_FEED    IO_USERNAME "/feeds/flag"
+
+// ── Global objects ─────────────────────────────────────────────────────────────
+WiFiClient client;
+
+Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT,
+                          IO_USERNAME, IO_KEY);
+
+Adafruit_MQTT_Publish tempFeed           = Adafruit_MQTT_Publish(&mqtt, TEMP_FEED);
+Adafruit_MQTT_Publish hrFeed             = Adafruit_MQTT_Publish(&mqtt, HR_FEED);
+Adafruit_MQTT_Publish spo2Feed           = Adafruit_MQTT_Publish(&mqtt, SPO2_FEED);
+Adafruit_MQTT_Publish statusFeed         = Adafruit_MQTT_Publish(&mqtt, FLAG_FEED);
+Adafruit_MQTT_Publish motionFeed         = Adafruit_MQTT_Publish(&mqtt, MOTION_FEED);
+
+OneWire oneWire(TEMP_SENSOR_PIN);
+DallasTemperature sensors(&oneWire);
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// ── FreeRTOS queues ────────────────────────────────────────────────────────────
+QueueHandle_t hrQueue;
+QueueHandle_t spo2Queue;
+
+// ── Helper: MQTT reconnect ─────────────────────────────────────────────────────
+void mqttConnect() {
+  if (mqtt.connected()) return;
+  Serial.print("Connecting to MQTT... ");
+  int8_t ret;
+  uint8_t retries = 5;
+  while ((ret = mqtt.connect()) != 0 && retries--) {
+    Serial.println(mqtt.connectErrorString(ret));
+    Serial.println("Retrying in 2 s...");
+    mqtt.disconnect();
+    vTaskDelay(pdMS_TO_TICKS(2000));
+  }
+  if (retries == 0) {
+    Serial.println("MQTT connection failed – continuing offline.");
+  } else {
+    Serial.println("MQTT connected!");
+  }
+}
+
+// ── Task 1: Sensor sampling (HR & SpO2 simulation) ────────────────────────────
+void sensorTask(void *param) {
+  int heartRate;
+  int spo2;
+
+  while (1) {
+    heartRate = random(45, 110);
+    spo2      = random(60, 100);
+
+    xQueueOverwrite(hrQueue,   &heartRate);
+    xQueueOverwrite(spo2Queue, &spo2);
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+}
+
+// ── Task 2: Processing – display, alerts, MQTT publish ────────────────────────
+void processingTask(void *param) {
+  float       temperature;
+  int         heartRate;
+  int         spo2;
+  const char *statusMsg;
+
+  while (1) {
+    // Read latest values from queues (non-blocking peek)
+    xQueuePeek(hrQueue,   &heartRate, 0);
+    xQueuePeek(spo2Queue, &spo2,      0);
+
+    // DS18B20 temperature
+    sensors.requestTemperatures();
+    temperature = sensors.getTempCByIndex(0);
+
+    // ── Determine status ───────────────────────────────────────────────────────
+    statusMsg = "OK";
+    if (temperature > 38.0f) {
+      statusMsg = "High Body Temp";
+    } else if (heartRate < 60) {
+      statusMsg = "Low Heart Rate";
+    } else if (heartRate > 100) {
+      statusMsg = "High Heart Rate";
+    } else if (spo2 < 85) {
+      statusMsg = "Low SpO2";
+    }
+
+    // ── OLED display ───────────────────────────────────────────────────────────
+    display.clearDisplay();
+
+    display.setCursor(0, 0);
+    display.print("Temp: ");
+    display.print(temperature, 1);
+    display.print(" C");
+
+    display.setCursor(0, 16);
+    display.print("HR:   ");
+    display.print(heartRate);
+    display.print(" bpm");
+
+    display.setCursor(0, 32);
+    display.print("SpO2: ");
+    display.print(spo2);
+    display.print(" %");
+
+    display.setCursor(0, 48);
+    display.print(statusMsg);
+
+    display.display();
+
+    // ── Buzzer alerts ──────────────────────────────────────────────────────────
+    if (temperature > 38.0f) {
+      digitalWrite(BUZZER_PIN_1, HIGH);
+      vTaskDelay(pdMS_TO_TICKS(50));
+      digitalWrite(BUZZER_PIN_1, LOW);
+      vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    if (heartRate < 60 || heartRate > 100) {
+      digitalWrite(BUZZER_PIN_2, HIGH);
+      vTaskDelay(pdMS_TO_TICKS(50));
+      digitalWrite(BUZZER_PIN_2, LOW);
+      vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    if (spo2 < 85) {
+      digitalWrite(BUZZER_PIN_3, HIGH);
+      vTaskDelay(pdMS_TO_TICKS(50));
+      digitalWrite(BUZZER_PIN_3, LOW);
+      vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    if (digitalRead(MOTION_PIN)) {
+      digitalWrite(BUZZER_PIN_4, HIGH);
+      vTaskDelay(pdMS_TO_TICKS(50));
+      digitalWrite(BUZZER_PIN_4, LOW);
+      vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    // ── MQTT publish ───────────────────────────────────────────────────────────
+    mqttConnect();
+    mqtt.processPackets(10);
+    mqtt.ping();
+
+    tempFeed.publish(temperature);
+    hrFeed.publish((int32_t)heartRate);
+    spo2Feed.publish((int32_t)spo2);
+    statusFeed.publish(statusMsg);
+    motionFeed.publish((int32_t)digitalRead(MOTION_PIN));
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+}
+
+// ── setup ──────────────────────────────────────────────────────────────────────
+void setup() {
+  Serial.begin(115200);
+
+  // Output pins
+  pinMode(BUZZER_PIN_1, OUTPUT);
+  pinMode(BUZZER_PIN_2, OUTPUT);
+  pinMode(BUZZER_PIN_3, OUTPUT);
+  pinMode(BUZZER_PIN_4, OUTPUT);
+
+  // Input pin
+  pinMode(MOTION_PIN, INPUT);
+
+  // DS18B20
+  sensors.begin();
+
+  // OLED
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
+    Serial.println("SSD1306 allocation failed");
+    while (1) vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("Healthcare Monitor");
+  display.println("Connecting WiFi...");
+  display.display();
+
+  // Wi-Fi
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println("\nWiFi connected. IP: " + WiFi.localIP().toString());
+
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("WiFi OK");
+  display.println(WiFi.localIP().toString());
+  display.display();
+  delay(1000);
+
+  // FreeRTOS queues (length 1 – always overwrite with latest value)
+  hrQueue   = xQueueCreate(1, sizeof(int));
+  spo2Queue = xQueueCreate(1, sizeof(int));
+
+  // Seed random with an unconnected ADC pin for better randomness
+  randomSeed(analogRead(0));
+
+  // Launch tasks
+  xTaskCreatePinnedToCore(sensorTask,     "SensorTask",     2048, NULL, 2, NULL, 0);
+  xTaskCreatePinnedToCore(processingTask, "ProcessingTask", 4096, NULL, 1, NULL, 1);
+}
+
+// loop() is intentionally empty – FreeRTOS tasks do all the work
+void loop() {}

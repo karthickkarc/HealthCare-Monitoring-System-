@@ -1,0 +1,24 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Arduino build cache
+build/
+*.bin
+*.elf
+*.hex
+*.map
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Credentials – never commit these!
+secrets.h
+credentials.h
