@@ -132,20 +132,6 @@ Edit the top of `sketch.ino`:
 
 ---
 
-## Bugs Fixed vs. Original Wokwi Sketch
-
-| Location | Original | Fixed |
-|---|---|---|
-| `WifiClient` | Incorrect capitalisation | `WiFiClient` |
-| `sop2` variable | Typo (`sop2`) | `spo2` |
-| `xqueueOverwrite` | Wrong case | `xQueueOverwrite` |
-| `xWueuePeek` | Typo | `xQueuePeek` |
-| `display.setCurusor` | Typo | `display.setCursor` |
-| `display.clearDisplay()` | Missing semicolon | Added `;` |
-| Heart-rate upper alert | `heartRate > 300` | `heartRate > 100` (physiological limit) |
-| `hrFeed` publish | Used before declaration | Declared properly |
-| `MOTION_DETECTOR` macro | Redefined as both pin and feed string | Separated into `MOTION_PIN` and `MOTION_FEED` |
-
 ---
 
 ## License
